@@ -28,9 +28,21 @@ class BluetoothManager: NSObject, ObservableObject {
     @Published var receivedMessages: [Message] = []
     @Published var connectionStatus = "Disconnected"
 
+    // Authentication state
+    @Published var isAuthenticated = false
+    @Published var authState: AuthState = .notStarted
+    @Published var username: String = ""
+    @Published var countdownSeconds: Int = 0
+    @Published var currentAttempt: Int = 0
+    @Published var attemptsPassed: Int = 0
+    @Published var authMessage: String = ""
+
     // Track recently sent messages to detect echoes
     private var recentlySentMessages: [(text: String, timestamp: Date)] = []
     private let echoTimeWindow: TimeInterval = 2.0  // 2 seconds
+
+    // Buffer for incoming message fragments
+    private var messageBuffer: String = ""
 
     override init() {
         super.init()
@@ -89,9 +101,41 @@ class BluetoothManager: NSObject, ObservableObject {
     }
 
     func sendMessage(_ message: String) {
+        guard isAuthenticated else {
+            print("Cannot send message: not authenticated")
+            return
+        }
+
+        // Format: MSG:username:message
+        let formattedMessage = "MSG:\(username):\(message)"
+        sendRawMessage(formattedMessage)
+
+        // Add to local messages
+        let newMessage = Message(text: message, isSent: true, timestamp: Date())
+        DispatchQueue.main.async {
+            self.receivedMessages.append(newMessage)
+        }
+    }
+
+    // MARK: - Authentication Methods
+
+    func submitUsername(_ name: String) {
+        username = name
+        authState = .waitingForResponse
+        sendRawMessage("USERNAME:\(name)")
+        print("Submitted username: \(name)")
+    }
+
+    func startGestureRecording() {
+        sendRawMessage("READY_FOR_GESTURE:\(username)")
+        print("Requested gesture recording")
+    }
+
+    private func sendRawMessage(_ message: String) {
         guard let peripheral = connectedPeripheral,
               let characteristic = rxCharacteristic,
               let data = message.data(using: .utf8) else {
+            print("Cannot send message: not ready")
             return
         }
 
@@ -106,16 +150,101 @@ class BluetoothManager: NSObject, ObservableObject {
             offset += chunkSize
         }
 
-        // Track this message to detect echo
-        recentlySentMessages.append((text: message, timestamp: Date()))
+        print("Sent: \(message)")
+    }
 
-        // Clean up old entries (older than echo time window)
-        recentlySentMessages.removeAll { Date().timeIntervalSince($0.timestamp) > echoTimeWindow }
+    private func handleAuthenticationMessage(_ message: String) {
+        print("Auth message: \(message)")
 
-        // Add to local messages
-        let newMessage = Message(text: message, isSent: true, timestamp: Date())
-        DispatchQueue.main.async {
-            self.receivedMessages.append(newMessage)
+        if message.starts(with: "AUTH_REQUIRED") {
+            DispatchQueue.main.async {
+                self.authState = .notStarted
+                self.authMessage = "Please sign in with your first name"
+            }
+        } else if message.starts(with: "NEW_USER:") {
+            let text = message.replacingOccurrences(of: "NEW_USER:", with: "")
+            DispatchQueue.main.async {
+                self.authState = .newUser
+                self.authMessage = text
+                self.currentAttempt = 0
+                self.attemptsPassed = 0
+            }
+        } else if message.starts(with: "EXISTING_USER:") {
+            let text = message.replacingOccurrences(of: "EXISTING_USER:", with: "")
+            DispatchQueue.main.async {
+                self.authState = .existingUser
+                self.authMessage = text
+                self.currentAttempt = 0
+                self.attemptsPassed = 0
+            }
+        } else if message.starts(with: "COUNTDOWN:") {
+            if let seconds = Int(message.replacingOccurrences(of: "COUNTDOWN:", with: "")) {
+                DispatchQueue.main.async {
+                    self.authState = .countdown
+                    self.countdownSeconds = seconds
+                    self.authMessage = "Get ready..."
+                }
+            }
+        } else if message.starts(with: "RECORDING:") {
+            if let attempt = Int(message.replacingOccurrences(of: "RECORDING:", with: "")) {
+                DispatchQueue.main.async {
+                    self.authState = .recording
+                    self.currentAttempt = attempt
+                    self.authMessage = "Recording gesture... (Attempt \(attempt)/3)"
+                }
+            }
+        } else if message.starts(with: "ATTEMPT_RESULT:") {
+            // Format: ATTEMPT_RESULT:1:success:1/3
+            let parts = message.components(separatedBy: ":")
+            if parts.count >= 4 {
+                let result = parts[2] // "success" or "failed"
+                let score = parts[3]  // "1/3"
+                let scoreParts = score.components(separatedBy: "/")
+                if scoreParts.count == 2, let passed = Int(scoreParts[0]) {
+                    DispatchQueue.main.async {
+                        self.authState = .verifying
+                        self.attemptsPassed = passed
+                        self.authMessage = "Attempt \(result == "success" ? "passed" : "failed")! (\(score))"
+                    }
+                }
+            }
+        } else if message.starts(with: "AUTH_SUCCESS:") {
+            let name = message.replacingOccurrences(of: "AUTH_SUCCESS:", with: "")
+            DispatchQueue.main.async {
+                self.authState = .authenticated
+                self.isAuthenticated = true
+                self.authMessage = "Welcome \(name)!"
+                self.connectionStatus = "Authenticated as \(name)"
+            }
+        } else if message.starts(with: "AUTH_FAILED:") {
+            let reason = message.replacingOccurrences(of: "AUTH_FAILED:", with: "")
+            DispatchQueue.main.async {
+                self.authState = .failed
+                self.isAuthenticated = false
+                self.authMessage = reason
+            }
+        } else if message.starts(with: "ERROR:") {
+            let error = message.replacingOccurrences(of: "ERROR:", with: "")
+            DispatchQueue.main.async {
+                self.authMessage = "Error: \(error)"
+            }
+        }
+    }
+
+    private func handleChatMessage(_ message: String) {
+        // Format: MSG:username:text
+        let parts = message.components(separatedBy: ":")
+        if parts.count >= 3, parts[0] == "MSG" {
+            let senderName = parts[1]
+            let text = parts[2...].joined(separator: ":")
+
+            // Don't show messages from ourselves
+            if senderName != username {
+                let newMessage = Message(text: "\(senderName): \(text)", isSent: false, timestamp: Date())
+                DispatchQueue.main.async {
+                    self.receivedMessages.append(newMessage)
+                }
+            }
         }
     }
 }
@@ -237,27 +366,31 @@ extension BluetoothManager: CBPeripheralDelegate {
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
         guard let data = characteristic.value,
-              let message = String(data: data, encoding: .utf8) else {
+              let fragment = String(data: data, encoding: .utf8) else {
             return
         }
 
-        print("Received message from server: \(message)")
+        // Append to buffer (messages may come in fragments)
+        messageBuffer += fragment
 
-        // Check if this is an echo of our own message
-        let isEcho = recentlySentMessages.contains { sentMessage in
-            sentMessage.text == message && Date().timeIntervalSince(sentMessage.timestamp) <= echoTimeWindow
-        }
+        // Process complete messages (ending with newline)
+        if messageBuffer.contains("\n") {
+            let messages = messageBuffer.components(separatedBy: "\n")
+            messageBuffer = messages.last ?? "" // Keep incomplete fragment
 
-        if isEcho {
-            print("Ignoring echo of own message: \(message)")
-            return
-        }
+            for message in messages.dropLast() {
+                let trimmedMessage = message.trimmingCharacters(in: .whitespaces)
+                guard !trimmedMessage.isEmpty else { continue }
 
-        // This is a genuine message from another client
-        print("Displaying message from other client: \(message)")
-        let newMessage = Message(text: message, isSent: false, timestamp: Date())
-        DispatchQueue.main.async {
-            self.receivedMessages.append(newMessage)
+                print("Received: \(trimmedMessage)")
+
+                // Route message based on prefix
+                if trimmedMessage.starts(with: "MSG:") {
+                    handleChatMessage(trimmedMessage)
+                } else {
+                    handleAuthenticationMessage(trimmedMessage)
+                }
+            }
         }
     }
 
@@ -280,4 +413,18 @@ struct Message: Identifiable {
     let text: String
     let isSent: Bool
     let timestamp: Date
+}
+
+// MARK: - Authentication State
+
+enum AuthState {
+    case notStarted
+    case waitingForResponse
+    case newUser
+    case existingUser
+    case countdown
+    case recording
+    case verifying
+    case authenticated
+    case failed
 }
