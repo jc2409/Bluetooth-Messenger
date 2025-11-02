@@ -201,17 +201,24 @@ class RxCharacteristic(Characteristic):
             if not session:
                 return
 
-            attempt_num = session.current_attempt + 1
-
             # Notify iOS that recording is starting
             if session.is_new_user:
                 self.service.tx_characteristic.send_tx(
-                    f'RECORDING_START:Will collect 3 gesture samples. Follow prompts on Raspberry Pi.'
+                    f'RECORDING_START:Will collect 3 gesture samples. Get ready!'
                 )
             else:
                 self.service.tx_characteristic.send_tx(
-                    f'RECORDING_START:Attempt {attempt_num}/3. Perform gesture on Raspberry Pi.'
+                    f'RECORDING_START:Get ready to perform your gesture!'
                 )
+
+            # Send 3-second countdown
+            import time
+            for i in range(3, 0, -1):
+                self.service.tx_characteristic.send_tx(f'COUNTDOWN:{i}')
+                time.sleep(1)
+
+            # Notify that recording is now happening
+            self.service.tx_characteristic.send_tx('RECORDING:Recording your gesture...')
 
             # Update session state
             success = auth_manager.start_gesture_recording(device_id)

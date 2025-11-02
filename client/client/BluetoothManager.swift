@@ -240,6 +240,21 @@ class BluetoothManager: NSObject, ObservableObject {
             DispatchQueue.main.async {
                 self.authState = .recording
                 self.authMessage = text
+                self.countdownSeconds = 0  // Reset countdown
+            }
+        } else if message.starts(with: "COUNTDOWN:") {
+            let secondsStr = message.replacingOccurrences(of: "COUNTDOWN:", with: "")
+            if let seconds = Int(secondsStr) {
+                DispatchQueue.main.async {
+                    self.countdownSeconds = seconds
+                    self.authMessage = "Starting in \(seconds)..."
+                }
+            }
+        } else if message.starts(with: "RECORDING:") {
+            let text = message.replacingOccurrences(of: "RECORDING:", with: "")
+            DispatchQueue.main.async {
+                self.countdownSeconds = 0
+                self.authMessage = text
             }
         } else if message.starts(with: "ATTEMPT_RESULT:") {
             // Format: ATTEMPT_RESULT:1:success:1/3

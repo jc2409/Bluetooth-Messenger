@@ -149,13 +149,27 @@ struct AuthenticationView: View {
 
     var recordingView: some View {
         VStack(spacing: 20) {
-            ProgressView()
-                .scaleEffect(2)
-                .padding()
+            if bluetoothManager.countdownSeconds > 0 {
+                // Show countdown
+                Text("\(bluetoothManager.countdownSeconds)")
+                    .font(.system(size: 80, weight: .bold))
+                    .foregroundColor(.orange)
+                    .padding()
 
-            Text("Recording...")
-                .font(.title2)
-                .fontWeight(.bold)
+                Text("Get ready!")
+                    .font(.title2)
+                    .fontWeight(.bold)
+            } else {
+                // Show recording in progress
+                ProgressView()
+                    .scaleEffect(2)
+                    .padding()
+
+                Text("Recording...")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                    .foregroundColor(.red)
+            }
 
             Text(bluetoothManager.authMessage)
                 .font(.body)

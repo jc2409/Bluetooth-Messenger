@@ -150,7 +150,7 @@ class AuthenticationManager:
 
         return True
 
-    def process_gesture_attempt(self, device_id: str) -> Dict:
+    def process_gesture_attempt(self, device_id: str, status_callback=None) -> Dict:
         """
         Process a gesture attempt (registration or verification).
 
