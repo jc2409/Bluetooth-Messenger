@@ -133,9 +133,15 @@ class BluetoothManager: NSObject, ObservableObject {
 
     private func sendRawMessage(_ message: String) {
         guard let peripheral = connectedPeripheral,
-              let characteristic = rxCharacteristic,
-              let data = message.data(using: .utf8) else {
+              let characteristic = rxCharacteristic else {
             print("Cannot send message: not ready")
+            return
+        }
+
+        // Add newline to mark end of message
+        let messageWithNewline = message + "\n"
+        guard let data = messageWithNewline.data(using: .utf8) else {
+            print("Cannot encode message")
             return
         }
 
