@@ -2,4 +2,3 @@ numpy>=1.21.0
 dtaidistance>=2.3.0
 hmmlearn>=0.2.7
 scikit-learn>=1.0.0
-mpu6050-datasheet>=0.1.0
