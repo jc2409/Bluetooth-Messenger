@@ -12,6 +12,7 @@ import dbus
 import dbus.mainloop.glib
 from gi.repository import GLib
 import time
+import threading
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'pi-ble-uart-server'))
 
@@ -183,27 +184,26 @@ class RxCharacteristic(Characteristic):
                 self.service.tx_characteristic.send_tx('ERROR:Please send username first')
                 return
 
-            # Start countdown and recording in a separate thread to not block
-            GLib.timeout_add(100, self._do_gesture_recording, device_id)
+            # Start recording in a background thread to not block BLE server
+            thread = threading.Thread(target=self._do_gesture_recording_threaded, args=(device_id,))
+            thread.daemon = True
+            thread.start()
 
         except Exception as e:
             print(f'Error in gesture ready: {e}')
 
-    def _do_gesture_recording(self, device_id):
-        """Perform gesture recording and authentication"""
+    def _do_gesture_recording_threaded(self, device_id):
+        """Run gesture recording in background thread (called from threading.Thread)"""
         global auth_manager
 
         try:
             session = auth_manager.get_session(device_id)
             if not session:
-                return False
+                return
 
             attempt_num = session.current_attempt + 1
 
             # Notify iOS that recording is starting
-            # Note: The actual countdown and recording happens inside the gesture functions
-            # (generate_single_gesture for registration, authenticate_against_gestures for verification)
-            # These functions print countdown on RPi console
             if session.is_new_user:
                 self.service.tx_characteristic.send_tx(
                     f'RECORDING_START:Will collect 3 gesture samples. Follow prompts on Raspberry Pi.'
@@ -217,13 +217,15 @@ class RxCharacteristic(Characteristic):
             success = auth_manager.start_gesture_recording(device_id)
 
             if success:
-                # Process the gesture (this is where actual recording happens)
+                # This is the blocking call - now it runs in background thread
+                print(f"[THREAD] Starting gesture recording for {device_id}...")
                 result = auth_manager.process_gesture_attempt(device_id)
+                print(f"[THREAD] Gesture recording complete for {device_id}")
 
                 # Check for errors in result
                 if 'error' in result:
                     self.service.tx_characteristic.send_tx(f"ERROR:{result['error']}")
-                    return False
+                    return
 
                 # For new users, registration happens all at once
                 if session.is_new_user:
@@ -251,12 +253,10 @@ class RxCharacteristic(Characteristic):
                 self.service.tx_characteristic.send_tx('ERROR:Recording failed')
 
         except Exception as e:
-            print(f'Error in gesture recording: {e}')
+            print(f'Error in gesture recording thread: {e}')
             import traceback
             traceback.print_exc()
             self.service.tx_characteristic.send_tx(f'ERROR:{str(e)}')
-
-        return False  # Don't repeat this timer
 
     def _handle_chat_message(self, message):
         """Handle MSG:username:text message"""
