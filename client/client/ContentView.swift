@@ -15,7 +15,98 @@ struct ContentView: View {
 
     var body: some View {
         NavigationView {
-            VStack(spacing: 0) {
+            // Show authentication view if not authenticated, otherwise show chat
+            if bluetoothManager.isAuthenticated {
+                chatView
+            } else {
+                authenticationWrapper
+            }
+        }
+    }
+
+    // MARK: - Authentication Wrapper
+
+    var authenticationWrapper: some View {
+        VStack {
+            if bluetoothManager.isConnected {
+                AuthenticationView(bluetoothManager: bluetoothManager)
+            } else {
+                connectionPromptView
+            }
+        }
+        .navigationTitle("BLE Messenger")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Menu {
+                    if bluetoothManager.isConnected {
+                        Button(role: .destructive, action: {
+                            bluetoothManager.disconnect()
+                        }) {
+                            Label("Disconnect", systemImage: "wifi.slash")
+                        }
+                    } else {
+                        Button(action: {
+                            showDeviceList = true
+                            bluetoothManager.startScanning()
+                        }) {
+                            Label("Connect to Device", systemImage: "antenna.radiowaves.left.and.right")
+                        }
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+            }
+        }
+        .sheet(isPresented: $showDeviceList) {
+            DeviceListView(bluetoothManager: bluetoothManager, isPresented: $showDeviceList)
+        }
+    }
+
+    var connectionPromptView: some View {
+        VStack(spacing: 24) {
+            Spacer()
+
+            Image(systemName: "antenna.radiowaves.left.and.right")
+                .font(.system(size: 60))
+                .foregroundColor(.blue)
+
+            Text("Connect to Server")
+                .font(.title)
+                .fontWeight(.bold)
+
+            Text("Connect to the Raspberry Pi server to get started")
+                .font(.body)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
+
+            Button(action: {
+                showDeviceList = true
+                bluetoothManager.startScanning()
+            }) {
+                Text("Connect")
+                    .fontWeight(.semibold)
+                    .foregroundColor(.white)
+                    .frame(maxWidth: 300)
+                    .padding()
+                    .background(Color.blue)
+                    .cornerRadius(10)
+            }
+
+            Spacer()
+
+            Text(bluetoothManager.connectionStatus)
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+        .padding()
+    }
+
+    // MARK: - Chat View
+
+    var chatView: some View {
+        VStack(spacing: 0) {
                 // Status bar
                 HStack {
                     Circle()
@@ -75,24 +166,17 @@ struct ContentView: View {
                 }
                 .padding()
             }
-            .navigationTitle("BLE Messenger")
+            .navigationTitle("Chat - \(bluetoothManager.username)")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
-                        if bluetoothManager.isConnected {
-                            Button(role: .destructive, action: {
-                                bluetoothManager.disconnect()
-                            }) {
-                                Label("Disconnect", systemImage: "wifi.slash")
-                            }
-                        } else {
-                            Button(action: {
-                                showDeviceList = true
-                                bluetoothManager.startScanning()
-                            }) {
-                                Label("Connect to Device", systemImage: "antenna.radiowaves.left.and.right")
-                            }
+                        Button(role: .destructive, action: {
+                            bluetoothManager.disconnect()
+                            bluetoothManager.isAuthenticated = false
+                            bluetoothManager.authState = .notStarted
+                        }) {
+                            Label("Disconnect", systemImage: "wifi.slash")
                         }
 
                         Button(action: {
@@ -105,11 +189,9 @@ struct ContentView: View {
                     }
                 }
             }
-            .sheet(isPresented: $showDeviceList) {
-                DeviceListView(bluetoothManager: bluetoothManager, isPresented: $showDeviceList)
-            }
-        }
     }
+
+    // MARK: - Helper Methods
 
     private func sendMessage() {
         guard !messageText.isEmpty else { return }
@@ -117,6 +199,8 @@ struct ContentView: View {
         messageText = ""
     }
 }
+
+// MARK: - Supporting Views
 
 struct MessageBubble: View {
     let message: Message
