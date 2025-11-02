@@ -4,13 +4,14 @@ A Bluetooth Low Energy (BLE) messenger system that enables iOS devices to commun
 
 ## Architecture
 
-- **Server**: Raspberry Pi running Python-based BLE GATT server
+- **Server**: Raspberry Pi running Python-based BLE GATT server with multi-client relay support
 - **Client**: iOS app built with SwiftUI and CoreBluetooth
+- **Authenticator**: MPU6050 sensor integration for motion-based authentication
 
 The system uses the Nordic UART Service (NUS) for bidirectional communication:
-- Service UUID: `6E400001-B5A3-F393-E0A9-E50E24DCCA9E`
-- TX Characteristic (Server → Client): `6E400003-B5A3-F393-E0A9-E50E24DCCA9E`
-- RX Characteristic (Client → Server): `6E400002-B5A3-F393-E0A9-E50E24DCCA9E`
+- Service UUID: `6e400001-b5a3-f393-e0a9-e50e24dcca9e`
+- TX Characteristic (Server → Client): `6e400003-b5a3-f393-e0a9-e50e24dcca9e`
+- RX Characteristic (Client → Server): `6e400002-b5a3-f393-e0a9-e50e24dcca9e`
 
 ## Features
 
@@ -24,11 +25,17 @@ The system uses the Nordic UART Service (NUS) for bidirectional communication:
 - Bluetooth state monitoring
 
 ### Server (Raspberry Pi)
-- BLE GATT server using BlueZ
+- Multi-client BLE GATT server using BlueZ
 - Nordic UART Service implementation
-- Bidirectional message relay
-- Console input for server messages
-- Support for multiple characteristics
+- Automatic message relay between connected clients
+- Console input for server broadcasts
+- Client subscription tracking
+- Broadcast notifications to all connected devices
+
+### Authenticator
+- MPU6050 accelerometer and gyroscope sensor integration
+- Real-time sensor data reading
+- Motion-based authentication capability
 
 ## Requirements
 
@@ -40,6 +47,9 @@ The system uses the Nordic UART Service (NUS) for bidirectional communication:
 - Required Python packages:
   - `dbus-python`
   - `PyGObject`
+- Optional (for authenticator):
+  - MPU6050 sensor module
+  - `mpu6050-raspberrypi` Python package
 
 ### iOS
 - iOS 14.0 or later
@@ -63,17 +73,25 @@ sudo systemctl enable bluetooth
 sudo systemctl start bluetooth
 ```
 
-3. **Run the UART server**:
+3. **Run the multi-client server**:
 ```bash
 cd server
-sudo python3 uart_peripheral.py
+sudo python3 multi_client_server.py
 ```
 
 The server will:
 - Start advertising as `rpi-gatt-server`
 - Wait for iOS clients to connect
-- Accept typed messages from console
-- Display received messages from clients
+- Relay messages between all connected clients
+- Accept typed messages from console to broadcast
+- Track and display client subscription count
+
+4. **Optional: Setup authenticator**:
+```bash
+cd authenticator
+sudo pip3 install mpu6050-raspberrypi
+python3 read_sensor_data.py
+```
 
 ### iOS App Setup
 
@@ -104,7 +122,8 @@ open client.xcodeproj
 
 1. **Start the Raspberry Pi server**:
 ```bash
-sudo python3 uart_peripheral.py
+cd server
+sudo python3 multi_client_server.py
 ```
 
 2. **Open the iOS app** on your device
@@ -120,43 +139,46 @@ sudo python3 uart_peripheral.py
    - Tap the send button
    - Messages appear in blue (sent) or gray (received)
 
-### Server Console Messages
+### Server Console Broadcasting
 
-On the Raspberry Pi, type messages in the console and press Enter to send them to all connected iOS clients.
+On the Raspberry Pi, type messages in the console and press Enter to broadcast them to all connected iOS clients.
 
-### Multi-User Setup
+### Multi-Client Messaging
 
-To enable communication between multiple iPhone users through the Raspberry Pi:
+The server automatically relays messages between all connected clients:
 
-1. Each iPhone connects to the same Raspberry Pi server
-2. Messages sent from any iPhone go to the server
-3. The server can relay messages to all connected devices
-4. Currently, the server displays received messages in console
+1. Multiple iPhones can connect to the same Raspberry Pi server simultaneously
+2. When any iPhone sends a message, the server receives it
+3. The server automatically broadcasts the message to all connected clients
+4. The server console displays subscriber count and message activity
 
-**Note**: The current implementation shows received messages on the server console. To relay messages between iPhones, you would need to modify `uart_peripheral.py` to broadcast received messages to all connected clients.
+**Note**: Messages are currently broadcast to all clients including the sender. The BLE GATT specification doesn't provide a way to exclude specific devices from notifications.
 
 ## Project Structure
 
 ```
 Bluetooth-Messenger/
-├── client/                    # iOS application
+├── client/                           # iOS application
 │   ├── client/
-│   │   ├── BluetoothManager.swift    # BLE central manager
-│   │   ├── ContentView.swift         # Main UI
+│   │   ├── BluetoothManager.swift   # BLE central manager
+│   │   ├── ContentView.swift        # Main UI with chat interface
 │   │   ├── clientApp.swift          # App entry point
-│   │   └── Info.plist               # Bluetooth permissions
-│   └── client.xcodeproj
-├── server/                    # Raspberry Pi server
-│   ├── uart_peripheral.py    # UART service implementation
-│   ├── example_gatt_server.py # GATT server base classes
-│   └── example_advertisement.py # BLE advertisement
+│   │   └── Assets.xcassets/         # App icons and assets
+│   └── client.xcodeproj/            # Xcode project files
+├── server/                           # Raspberry Pi BLE server
+│   ├── multi_client_server.py       # Multi-client relay server
+│   └── pi-ble-uart-server/          # BLE GATT base implementation
+├── authenticator/                    # Motion-based authentication
+│   ├── read_sensor_data.py          # MPU6050 sensor reader
+│   └── mpu6050/                     # Sensor library directory
 └── README.md
 ```
 
 ## Code Overview
 
-### BluetoothManager.swift
+### iOS Client
 
+#### client/client/BluetoothManager.swift
 The `BluetoothManager` class handles all BLE operations:
 - **Central Manager**: Scans for and connects to peripherals
 - **Service Discovery**: Finds the UART service and characteristics
@@ -169,8 +191,7 @@ Key methods:
 - `sendMessage(_:)`: Send text message (auto-chunks to 20 bytes)
 - `disconnect()`: Close connection
 
-### ContentView.swift
-
+#### client/client/ContentView.swift
 SwiftUI interface with three main components:
 
 1. **ContentView**: Main chat interface
@@ -188,6 +209,40 @@ SwiftUI interface with three main components:
    - Lists discovered BLE devices
    - Shows device names and UUIDs
    - Connect button for each device
+
+### Raspberry Pi Server
+
+#### server/multi_client_server.py
+Multi-client BLE GATT server implementation:
+
+1. **TxCharacteristic**: Handles server-to-client notifications
+   - Broadcasts messages to all subscribed clients
+   - Tracks subscriber count
+   - Accepts console input for server broadcasts
+
+2. **RxCharacteristic**: Handles client-to-server writes
+   - Receives messages from clients
+   - Automatically relays to all connected clients via TX characteristic
+
+3. **UartService**: Nordic UART Service implementation
+   - Combines TX and RX characteristics
+   - Manages bidirectional communication
+
+4. **UartApplication**: GATT application wrapper
+   - Registers services with BlueZ
+
+5. **UartAdvertisement**: BLE advertisement
+   - Advertises UART service UUID
+   - Sets local name to `rpi-gatt-server`
+
+### Authenticator
+
+#### authenticator/read_sensor_data.py
+MPU6050 sensor data reader:
+- Reads accelerometer data (X, Y, Z axes)
+- Reads gyroscope data (X, Y, Z axes)
+- Continuous polling loop for real-time data
+- Designed for motion-based authentication patterns
 
 ## Troubleshooting
 
@@ -225,59 +280,74 @@ sudo hciconfig hci0 up
 
 ## Extending the App
 
-### Message Relay Between Users
+### Filter Message Echo
 
-To relay messages between multiple iPhone users, modify `uart_peripheral.py`:
+Currently, messages are broadcast to all clients including the sender. To prevent echo:
+- Add client identification in the message protocol
+- Track sender information in `RxCharacteristic.WriteValue()`
+- Skip notification for the sending client in `TxCharacteristic.send_tx()`
 
-```python
-class RxCharacteristic(Characteristic):
-    def __init__(self, bus, index, service):
-        Characteristic.__init__(self, bus, index, UART_RX_CHARACTERISTIC_UUID,
-                                ['write'], service)
-        self.service = service
-
-    def WriteValue(self, value, options):
-        message = bytearray(value).decode()
-        print('remote: {}'.format(message))
-        # Relay to all connected clients via TX characteristic
-        if hasattr(self.service, 'tx_characteristic'):
-            self.service.tx_characteristic.send_tx(message + '\n')
-```
+Note: This requires modifications to both iOS and server code to include client identifiers.
 
 ### Add User Identification
 
-Modify the message format to include sender info:
-- iOS: Send `"username: message"`
-- Server: Parse and relay with sender identification
-- iOS: Display sender name in UI
+Enhance the message format to include sender info:
+1. **iOS** (`client/client/BluetoothManager.swift`):
+   - Add username configuration
+   - Prefix messages with `"username: message"` format
+2. **Server** (`server/multi_client_server.py`):
+   - Parse sender identification from message
+   - Relay with sender info intact
+3. **iOS** (`client/client/ContentView.swift`):
+   - Parse and display sender name in message bubbles
+   - Distinguish between different senders with colors
 
 ### Encryption
 
 For secure messaging:
-- Implement encryption at the application layer
-- Use AES encryption before sending messages
-- Exchange keys during initial pairing
+- Implement end-to-end encryption at the application layer
+- Use AES-256 encryption before sending messages via BLE
+- Implement secure key exchange during initial pairing
+- Store encryption keys in iOS Keychain
+
+### Integrate Authenticator
+
+Connect motion-based authentication to the messaging system:
+1. Read MPU6050 sensor data on Raspberry Pi
+2. Define authentication gesture patterns
+3. Validate user gestures before allowing message relay
+4. Send authentication status to iOS clients
 
 ## Technical Details
 
 ### BLE Data Limits
 
-- Maximum notification size: 20 bytes
-- Messages longer than 20 bytes are automatically chunked
+- Maximum notification size: 20 bytes (BLE GATT limitation)
+- Messages longer than 20 bytes are automatically chunked by iOS client
 - iOS app handles reassembly transparently
+- Server broadcasts complete messages to all clients
 
 ### Connection Parameters
 
 - Scan timeout: None (manual stop)
-- Connection interval: Default (set by iOS)
-- MTU: 23 bytes (20 bytes payload)
+- Connection interval: Default (determined by iOS)
+- MTU: 23 bytes (20 bytes payload + 3 bytes overhead)
+- Multiple simultaneous client connections supported
+
+### Multi-Client Architecture
+
+- Each BLE GATT characteristic is shared across all connected clients
+- Notifications are automatically broadcast to all subscribed devices
+- Server tracks subscriber count via `StartNotify()` callbacks
+- Message relay happens at the application layer in `RxCharacteristic`
 
 ### Power Consumption
 
 The app is designed for efficiency:
 - Stops scanning when connected
-- Uses notifications (not polling)
+- Uses notifications (not polling) for incoming messages
 - Background mode enabled for persistent connections
+- Server runs continuously with low idle power consumption
 
 ## License
 
