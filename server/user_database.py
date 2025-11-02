@@ -47,13 +47,14 @@ class UserDatabase:
         """Check if user exists in database."""
         return username.lower() in self.users
 
-    def register_user(self, username: str, gesture_template: List[float]) -> bool:
+    def register_user(self, username: str, gesture_list: List) -> bool:
         """
-        Register a new user with their gesture template.
+        Register a new user with their gesture samples.
 
         Args:
             username: User's first name
-            gesture_template: Gesture feature vector
+            gesture_list: List of gesture arrays (numpy arrays converted to lists)
+                         Each array is shape (160, 2) with X, Y coordinates
 
         Returns:
             True if registration successful, False if user already exists
@@ -64,30 +65,43 @@ class UserDatabase:
             print(f"Registration failed: User '{username}' already exists")
             return False
 
+        # Convert numpy arrays to lists for JSON serialization
+        serializable_gestures = []
+        for gesture in gesture_list:
+            if hasattr(gesture, 'tolist'):  # numpy array
+                serializable_gestures.append(gesture.tolist())
+            else:  # already a list
+                serializable_gestures.append(gesture)
+
         self.users[username_lower] = {
             "username": username,  # Keep original capitalization
-            "gesture_template": gesture_template,
+            "gesture_list": serializable_gestures,
+            "num_gestures": len(serializable_gestures),
             "created_at": datetime.now().isoformat(),
             "last_login": None
         }
 
         self._save_database()
-        print(f"User '{username}' registered successfully")
+        print(f"User '{username}' registered with {len(serializable_gestures)} gesture samples")
         return True
 
-    def get_gesture_template(self, username: str) -> Optional[List[float]]:
+    def get_gesture_list(self, username: str) -> Optional[List]:
         """
-        Get stored gesture template for user.
+        Get stored gesture list for user.
 
         Args:
             username: User's first name
 
         Returns:
-            Gesture template or None if user doesn't exist
+            List of gesture arrays or None if user doesn't exist
         """
         username_lower = username.lower()
         if username_lower in self.users:
-            return self.users[username_lower].get("gesture_template")
+            import numpy as np
+            # Convert lists back to numpy arrays for gesture recognition
+            gesture_data = self.users[username_lower].get("gesture_list")
+            if gesture_data:
+                return [np.array(g) for g in gesture_data]
         return None
 
     def update_last_login(self, username: str):

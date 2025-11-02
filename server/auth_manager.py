@@ -87,9 +87,12 @@ class AuthenticationManager:
                 'username': str
             }
         """
-        session = self.get_session(device_id)
-        if not session:
-            session = self.create_session(device_id)
+        # Always create fresh session for new authentication attempt
+        if device_id in self.sessions:
+            print(f"Resetting existing session for {device_id}")
+            self.remove_session(device_id)
+
+        session = self.create_session(device_id)
 
         # Validate username
         username = username.strip()
@@ -101,6 +104,10 @@ class AuthenticationManager:
 
         session.username = username
         session.is_new_user = not self.user_db.user_exists(username)
+
+        # RESET attempt counter for new authentication
+        session.current_attempt = 0
+        session.attempts = []
 
         if session.is_new_user:
             print(f"New user registration: {username}")
@@ -119,14 +126,17 @@ class AuthenticationManager:
 
     def start_gesture_recording(self, device_id: str, countdown_callback: Optional[Callable] = None) -> bool:
         """
-        Start countdown and gesture recording for a session.
+        Start gesture recording for a session.
+
+        Note: The actual countdown and recording happens inside the gesture recognizer functions
+        (generate_single_gesture for registration, authenticate_against_gestures for verification)
 
         Args:
             device_id: Device identifier
-            countdown_callback: Optional callback function(seconds_remaining)
+            countdown_callback: Optional callback function(seconds_remaining) - NOT USED ANYMORE
 
         Returns:
-            True if recording started successfully
+            True if session is ready for gesture recording
         """
         session = self.get_session(device_id)
         if not session or not session.username:
@@ -135,22 +145,17 @@ class AuthenticationManager:
         session.current_attempt += 1
         print(f"\n--- Attempt {session.current_attempt}/{session.max_attempts} for {session.username} ---")
 
-        # Countdown (3, 2, 1)
-        if countdown_callback:
-            for i in range(3, 0, -1):
-                countdown_callback(i)
-
-        # Record gesture
         session.state = AuthState.RECORDING
-        print(f"Recording gesture (4 seconds)...")
-        sensor_data = self.gesture_recognizer.start_recording(duration_seconds=4.0)
-        session.gesture_data = sensor_data
+        # Note: Actual recording happens in process_gesture_attempt()
 
         return True
 
     def process_gesture_attempt(self, device_id: str) -> Dict:
         """
-        Process a recorded gesture attempt (registration or verification).
+        Process a gesture attempt (registration or verification).
+
+        For registration: Collects 3 gesture samples automatically
+        For verification: Records 1 gesture and compares against stored gestures
 
         Returns:
             Dictionary with attempt result:
@@ -166,20 +171,27 @@ class AuthenticationManager:
             }
         """
         session = self.get_session(device_id)
-        if not session or not session.gesture_data:
-            return {'error': 'No gesture data available'}
+        if not session:
+            return {'error': 'No session found'}
 
         session.state = AuthState.VERIFYING
 
         if session.is_new_user:
-            # Registration: store gesture template
-            template, success = self.gesture_recognizer.register_gesture(
+            # Registration: collect 3 gesture samples
+            # The gesture_recognizer.register_gesture() handles:
+            # - Collecting 3 samples with countdown for each
+            # - Recording 4 seconds per sample
+            # - Returning list of 3 numpy arrays (160, 2)
+
+            print(f"Starting registration for {session.username}")
+            gesture_list, success = self.gesture_recognizer.register_gesture(
                 session.username,
-                session.gesture_data
+                num_samples=3
             )
 
-            if success:
-                self.user_db.register_user(session.username, template)
+            if success and gesture_list:
+                # Save all 3 gesture samples to database
+                self.user_db.register_user(session.username, gesture_list)
                 session.state = AuthState.AUTHENTICATED
                 self.user_db.update_last_login(session.username)
 
@@ -191,7 +203,7 @@ class AuthenticationManager:
                     'total_attempts': 1,
                     'auth_complete': True,
                     'auth_success': True,
-                    'message': f'Registration successful! Welcome {session.username}!'
+                    'message': f'Registration successful! {len(gesture_list)} gesture samples saved. Welcome {session.username}!'
                 }
             else:
                 return {
@@ -206,16 +218,23 @@ class AuthenticationManager:
                 }
 
         else:
-            # Verification: compare with stored template
-            stored_template = self.user_db.get_gesture_template(session.username)
+            # Verification: compare new gesture against all stored gestures
+            # The gesture_recognizer.verify_gesture() handles:
+            # - Recording 1 new gesture (4 seconds with countdown)
+            # - Comparing against all stored gestures using DTW
+            # - Returning (match, confidence) based on majority voting
 
-            if not stored_template:
-                return {'error': 'No gesture template found for user'}
+            stored_gestures = self.user_db.get_gesture_list(session.username)
+
+            if not stored_gestures:
+                return {'error': 'No gestures found for user'}
+
+            print(f"Verifying attempt {session.current_attempt} for {session.username}")
+            print(f"Comparing against {len(stored_gestures)} stored gestures")
 
             match, confidence = self.gesture_recognizer.verify_gesture(
                 session.username,
-                session.gesture_data,
-                stored_template
+                stored_gestures
             )
 
             # Record attempt result
@@ -223,7 +242,7 @@ class AuthenticationManager:
             total_passed = sum(1 for success, _ in session.attempts if success)
 
             print(f"Attempt {session.current_attempt}: {'PASS' if match else 'FAIL'} "
-                  f"(confidence: {confidence:.2f}) - Total: {total_passed}/{session.current_attempt}")
+                  f"(confidence: {confidence:.2%}) - Total: {total_passed}/{session.current_attempt}")
 
             # Check if authentication is complete
             auth_complete = session.current_attempt >= session.max_attempts

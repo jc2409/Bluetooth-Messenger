@@ -75,11 +75,19 @@ class TxCharacteristic(Characteristic):
 
     def StopNotify(self):
         """Called when a client unsubscribes"""
+        global auth_manager
+
         if self.subscriber_count > 0:
             self.subscriber_count -= 1
         if self.subscriber_count == 0:
             self.notifying = False
         print(f'✗ Client unsubscribed (remaining: {self.subscriber_count})')
+
+        # Clean up all authentication sessions when client disconnects
+        # Note: We can't track individual clients in BLE GATT, so we clear all sessions
+        if auth_manager and self.subscriber_count == 0:
+            print("→ Cleaning up authentication sessions")
+            auth_manager.sessions.clear()
 
 
 class RxCharacteristic(Characteristic):
@@ -182,50 +190,66 @@ class RxCharacteristic(Characteristic):
             print(f'Error in gesture ready: {e}')
 
     def _do_gesture_recording(self, device_id):
-        """Perform countdown and gesture recording"""
+        """Perform gesture recording and authentication"""
         global auth_manager
 
         try:
-            # Countdown
-            for i in range(3, 0, -1):
-                self.service.tx_characteristic.send_tx(f'COUNTDOWN:{i}')
-                time.sleep(1)
-
-            # Start recording
             session = auth_manager.get_session(device_id)
             if not session:
                 return False
 
             attempt_num = session.current_attempt + 1
-            self.service.tx_characteristic.send_tx(f'RECORDING:{attempt_num}')
 
-            # Record gesture
+            # Notify iOS that recording is starting
+            # Note: The actual countdown and recording happens inside the gesture functions
+            # (generate_single_gesture for registration, authenticate_against_gestures for verification)
+            # These functions print countdown on RPi console
+            if session.is_new_user:
+                self.service.tx_characteristic.send_tx(
+                    f'RECORDING_START:Will collect 3 gesture samples. Follow prompts on Raspberry Pi.'
+                )
+            else:
+                self.service.tx_characteristic.send_tx(
+                    f'RECORDING_START:Attempt {attempt_num}/3. Perform gesture on Raspberry Pi.'
+                )
+
+            # Update session state
             success = auth_manager.start_gesture_recording(device_id)
 
             if success:
-                # Process the recorded gesture
+                # Process the gesture (this is where actual recording happens)
                 result = auth_manager.process_gesture_attempt(device_id)
 
-                # Send attempt result
-                status = 'success' if result['success'] else 'failed'
-                self.service.tx_characteristic.send_tx(
-                    f"ATTEMPT_RESULT:{result['attempt_number']}:{status}:"
-                    f"{result['total_passed']}/{result['total_attempts']}"
-                )
-
-                # Check if authentication is complete
-                if result['auth_complete']:
+                # For new users, registration happens all at once
+                if session.is_new_user:
                     if result['auth_success']:
                         self.service.tx_characteristic.send_tx(f"AUTH_SUCCESS:{session.username}")
                     else:
-                        self.service.tx_characteristic.send_tx(
-                            f"AUTH_FAILED:Only {result['total_passed']}/3 attempts passed"
-                        )
+                        self.service.tx_characteristic.send_tx(f"AUTH_FAILED:Registration failed")
+                else:
+                    # For existing users, send attempt result
+                    status = 'success' if result['success'] else 'failed'
+                    self.service.tx_characteristic.send_tx(
+                        f"ATTEMPT_RESULT:{result['attempt_number']}:{status}:"
+                        f"{result['total_passed']}/{result['total_attempts']}"
+                    )
+
+                    # Check if authentication is complete
+                    if result['auth_complete']:
+                        if result['auth_success']:
+                            self.service.tx_characteristic.send_tx(f"AUTH_SUCCESS:{session.username}")
+                        else:
+                            self.service.tx_characteristic.send_tx(
+                                f"AUTH_FAILED:Only {result['total_passed']}/3 attempts passed"
+                            )
             else:
                 self.service.tx_characteristic.send_tx('ERROR:Recording failed')
 
         except Exception as e:
             print(f'Error in gesture recording: {e}')
+            import traceback
+            traceback.print_exc()
+            self.service.tx_characteristic.send_tx(f'ERROR:{str(e)}')
 
         return False  # Don't repeat this timer
 
