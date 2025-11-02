@@ -149,27 +149,17 @@ struct AuthenticationView: View {
 
     var recordingView: some View {
         VStack(spacing: 20) {
-            if bluetoothManager.countdownSeconds > 0 {
-                // Show countdown
-                Text("\(bluetoothManager.countdownSeconds)")
-                    .font(.system(size: 80, weight: .bold))
-                    .foregroundColor(.orange)
-                    .padding()
+            Image(systemName: "display")
+                .font(.system(size: 60))
+                .foregroundColor(.blue)
+                .padding()
 
-                Text("Get ready!")
-                    .font(.title2)
-                    .fontWeight(.bold)
-            } else {
-                // Show recording in progress
-                ProgressView()
-                    .scaleEffect(2)
-                    .padding()
+            Text("Watch Raspberry Pi")
+                .font(.title2)
+                .fontWeight(.bold)
 
-                Text("Recording...")
-                    .font(.title2)
-                    .fontWeight(.bold)
-                    .foregroundColor(.red)
-            }
+            ProgressView()
+                .padding()
 
             Text(bluetoothManager.authMessage)
                 .font(.body)
@@ -177,9 +167,14 @@ struct AuthenticationView: View {
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
 
-            Text("Follow the prompts on the Raspberry Pi")
-                .font(.caption)
-                .foregroundColor(.secondary)
+            VStack(spacing: 8) {
+                Text("Follow the countdown and instructions")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                Text("on the Raspberry Pi screen")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
         }
     }
 

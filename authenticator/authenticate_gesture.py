@@ -6,14 +6,13 @@ from authenticator import (
     SIMILARITY_THRESHOLD_DTW
 )
 
-def authenticate_against_gestures(gesture_list, countdown=3):
+def authenticate_against_gestures(gesture_list):
     """
     Authenticate a new gesture recording against a list of gesture arrays.
 
     Args:
         gesture_list: List of numpy arrays, each shape (160, 2)
                       These are the stored gesture recordings to compare against
-        countdown: Seconds to countdown before recording (default: 3, set to 0 to skip)
 
     Returns:
         tuple: (is_authenticated: bool, results: dict with details)
@@ -26,7 +25,7 @@ def authenticate_against_gestures(gesture_list, countdown=3):
     # Collect test gesture from user
     collector = SensorCollector(duration=4, target_hz=40)
     print("🔴 Recording... (4 seconds)")
-    test_gesture = collector.collect_gesture(countdown=countdown)
+    test_gesture = collector.collect_gesture(countdown=3)
     test_normalized = normalize_series(test_gesture)
     
     print("\n⏳ Comparing against gesture list...")
