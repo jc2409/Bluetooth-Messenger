@@ -1,20 +1,18 @@
 import numpy as np
 from pathlib import Path
-from sensor_collector import SensorCollector
-from authenticator import (
-    normalize_series,
-    dtw_distance,
-    SIMILARITY_THRESHOLD_DTW
-)
+from authenticate_gesture import authenticate_against_gestures
 
 def test_authentication():
     """
-    Test authentication with debug output.
+    Test authentication using the actual authenticate_gesture.py function.
+    This tests the EXACT same code that the frontend will call.
+    
+    Flow:
     1. Lists available gestures
     2. User selects one
-    3. Countdown and records new gesture
-    4. Compares against 3 reference gestures
-    5. Shows detailed results (pass/fail, scores, threshold)
+    3. Loads CSV reference files
+    4. Calls authenticate_against_gestures() (the backend function)
+    5. Shows detailed debug results
     """
     
     gestures_dir = Path("gestures")
@@ -65,68 +63,44 @@ def test_authentication():
         print("❌ No gesture recordings found!")
         return False
     
-    print(f"✓ Loaded {len(csv_files)} reference recordings")
+    print(f"✓ Loaded {len(csv_files)} reference recordings from CSV files")
     
     reference_gestures = []
     for csv_file in csv_files:
         gesture_data = np.loadtxt(csv_file, delimiter=',', skiprows=1)
         reference_gestures.append(gesture_data)
     
-    # Collect new test gesture
-    print("\n📝 Now record your gesture to test...")
+    # Call the ACTUAL backend function (authenticate_gesture.py)
+    print("\n📝 Now recording your gesture to test...")
     print("="*60)
     
-    collector = SensorCollector(duration=4, target_hz=40)
-    test_gesture = collector.collect_gesture(countdown=3)
+    is_authenticated, results = authenticate_against_gestures(reference_gestures)
     
-    # Normalize test gesture
-    test_normalized = normalize_series(test_gesture)
-    
-    # Compare against each reference
+    # Display detailed results
     print("\n" + "="*60)
-    print("🔍 AUTHENTICATION RESULTS")
+    print("📊 DETAILED DEBUG RESULTS")
     print("="*60)
-    print(f"Threshold: {SIMILARITY_THRESHOLD_DTW:.6f}\n")
     
-    results = []
-    passed_count = 0
-    
-    for i, reference_gesture in enumerate(reference_gestures, 1):
-        reference_normalized = normalize_series(reference_gesture)
-        distance = dtw_distance(reference_normalized, test_normalized)
-        passed = distance <= SIMILARITY_THRESHOLD_DTW
+    for result in results['dtw_results']:
+        distance = result['distance']
+        passed = result['passed']
+        status = "✅ PASS" if passed else "❌ FAIL"
         
-        if passed:
-            passed_count += 1
-            status = "✅ PASS"
-        else:
-            status = "❌ FAIL"
-        
-        results.append({
-            "index": i,
-            "distance": distance,
-            "passed": passed
-        })
-        
-        # Show result with comparison to threshold
-        diff = distance - SIMILARITY_THRESHOLD_DTW
+        diff = distance - results['threshold']
         diff_str = f"+{diff:.6f}" if diff >= 0 else f"{diff:.6f}"
         
-        print(f"Reference {i}:")
+        print(f"Reference {result['gesture_idx']}:")
         print(f"  Distance: {distance:.6f}")
-        print(f"  Threshold: {SIMILARITY_THRESHOLD_DTW:.6f}")
+        print(f"  Threshold: {results['threshold']:.6f}")
         print(f"  Difference: {diff_str}")
         print(f"  Result: {status}\n")
     
     # Final verdict
-    total = len(reference_gestures)
-    majority_threshold = total / 2.0
-    is_authenticated = passed_count > majority_threshold
-    
     print("="*60)
     print("📊 FINAL VERDICT")
     print("="*60)
-    print(f"Matched: {passed_count}/{total} references")
+    print(f"Matched: {results['passed_count']}/{results['total_count']} references")
+    majority_threshold = results['total_count'] / 2.0
     print(f"Required: > {majority_threshold} (majority)")
     print()
     

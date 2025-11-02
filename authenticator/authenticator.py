@@ -79,13 +79,26 @@ def normalize_series(series):
 # ALGORITHM 1: DTW (Dynamic Time Warping)
 # ============================================================================
 def dtw_distance(series1, series2):
-    """Calculate DTW distance between two 2D time series (80, 2)."""
+    """
+    Calculate DTW distance between two 2D time series (160, 2).
+    Compares X and Y separately, then combines scores.
+    This avoids interference between different trend axes.
+    """
     try:
-        # Flatten to 1D for DTW calculation: (80, 2) -> (160,)
-        s1_flat = series1.flatten()
-        s2_flat = series2.flatten()
-        distance = dtw.distance(s1_flat, s2_flat)
-        return distance / len(s1_flat)
+        # Extract X and Y separately
+        x1 = series1[:, 0]  # X values from series1
+        y1 = series1[:, 1]  # Y values from series1
+        x2 = series2[:, 0]  # X values from series2
+        y2 = series2[:, 1]  # Y values from series2
+        
+        # Calculate DTW distance for each axis independently
+        dist_x = dtw.distance(x1, x2) / len(x1)
+        dist_y = dtw.distance(y1, y2) / len(y1)
+        
+        # Combine scores (equal weight for both axes)
+        combined_distance = (dist_x + dist_y) / 2.0
+        
+        return combined_distance
     except:
         return float('inf')
 
