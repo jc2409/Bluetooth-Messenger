@@ -14,7 +14,6 @@ import warnings
 import os
 import importlib.util
 from pathlib import Path
-from example_data import GESTURES
 
 # Suppress sklearn convergence warnings
 warnings.filterwarnings('ignore')
@@ -291,14 +290,10 @@ def main():
     # Load demo gestures from example_data.py
     print("\n📁 Loading demo gestures from example_data.py...")
     all_gestures = {}
-    for gesture_name, gesture_data in GESTURES.items():
-        all_gestures[gesture_name] = {
-            "training": gesture_data["training"],
-            "test_similar": gesture_data["test_similar"],
-            "test_different": gesture_data["test_different"],
-            "source": "demo"
-        }
-        print(f"✅ Loaded: {gesture_name} (5 training + test sets)")
+    # The GESTURES dictionary is no longer imported, so we'll just load a placeholder
+    # This part of the code will need to be updated if actual demo data is required
+    # For now, we'll just print a message indicating the placeholder
+    print("Placeholder: No actual demo gestures loaded. This part of the code needs to be updated.")
     
     # NOTE: Trained gestures from examples/ are only loaded when needed by canvas
     # Standalone mode focuses on demo gestures for threshold tuning
