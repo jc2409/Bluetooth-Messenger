@@ -28,6 +28,10 @@ class BluetoothManager: NSObject, ObservableObject {
     @Published var receivedMessages: [Message] = []
     @Published var connectionStatus = "Disconnected"
 
+    // Track recently sent messages to detect echoes
+    private var recentlySentMessages: [(text: String, timestamp: Date)] = []
+    private let echoTimeWindow: TimeInterval = 2.0  // 2 seconds
+
     override init() {
         super.init()
         print("BluetoothManager: Initializing CBCentralManager")
@@ -101,6 +105,12 @@ class BluetoothManager: NSObject, ObservableObject {
             peripheral.writeValue(chunk, for: characteristic, type: .withResponse)
             offset += chunkSize
         }
+
+        // Track this message to detect echo
+        recentlySentMessages.append((text: message, timestamp: Date()))
+
+        // Clean up old entries (older than echo time window)
+        recentlySentMessages.removeAll { Date().timeIntervalSince($0.timestamp) > echoTimeWindow }
 
         // Add to local messages
         let newMessage = Message(text: message, isSent: true, timestamp: Date())
@@ -231,7 +241,20 @@ extension BluetoothManager: CBPeripheralDelegate {
             return
         }
 
-        // Received message from server
+        print("Received message from server: \(message)")
+
+        // Check if this is an echo of our own message
+        let isEcho = recentlySentMessages.contains { sentMessage in
+            sentMessage.text == message && Date().timeIntervalSince(sentMessage.timestamp) <= echoTimeWindow
+        }
+
+        if isEcho {
+            print("Ignoring echo of own message: \(message)")
+            return
+        }
+
+        // This is a genuine message from another client
+        print("Displaying message from other client: \(message)")
         let newMessage = Message(text: message, isSent: false, timestamp: Date())
         DispatchQueue.main.async {
             self.receivedMessages.append(newMessage)

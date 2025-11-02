@@ -27,18 +27,18 @@ UART_TX_CHARACTERISTIC_UUID = '6e400003-b5a3-f393-e0a9-e50e24dcca9e'
 LOCAL_NAME = 'rpi-gatt-server'
 mainloop = None
 
-# Global list to track all connected clients
-connected_clients = []
-
-
 class TxCharacteristic(Characteristic):
-    """TX Characteristic - sends data from server to client (notifications)"""
+    """TX Characteristic - sends data from server to client (notifications)
+
+    NOTE: In BLE GATT, one characteristic is SHARED by all connected devices.
+    When we send a notification, it goes to ALL subscribed clients automatically.
+    """
 
     def __init__(self, bus, index, service):
         Characteristic.__init__(self, bus, index, UART_TX_CHARACTERISTIC_UUID,
                                 ['notify'], service)
         self.notifying = False
-        self.client_id = None  # Track which client this characteristic belongs to
+        self.subscriber_count = 0
         GLib.io_add_watch(sys.stdin, GLib.IO_IN, self.on_console_input)
 
     def on_console_input(self, fd, condition):
@@ -49,37 +49,29 @@ class TxCharacteristic(Characteristic):
         else:
             # Broadcast server message to all connected clients
             print(f'Server broadcasting: {s.strip()}')
-            broadcast_message(s, source_client=None)
+            self.send_tx(s)
         return True
 
     def send_tx(self, s):
-        """Send message to this specific client"""
+        """Send message to ALL subscribed clients
+
+        This is the key: PropertiesChanged automatically sends
+        notifications to ALL devices that have subscribed.
+        """
         if not self.notifying:
+            print('Warning: No clients subscribed to notifications')
             return
         value = []
         for c in s:
             value.append(dbus.Byte(c.encode()))
+        print(f'Broadcasting to all {self.subscriber_count} subscriber(s)')
         self.PropertiesChanged(GATT_CHRC_IFACE, {'Value': value}, [])
 
     def StartNotify(self):
-        if self.notifying:
-            return
+        """Called when a client subscribes to notifications"""
+        self.subscriber_count += 1
         self.notifying = True
-        print(f'Client {self.client_id} started notifications')
-        # Register this client as connected
-        if self not in connected_clients:
-            connected_clients.append(self)
-            print(f'Total connected clients: {len(connected_clients)}')
-
-    def StopNotify(self):
-        if not self.notifying:
-            return
-        self.notifying = False
-        print(f'Client {self.client_id} stopped notifications')
-        # Unregister this client
-        if self in connected_clients:
-            connected_clients.remove(self)
-            print(f'Total connected clients: {len(connected_clients)}')
+        print(f'Client subscribed to notifications (total subscribers: {self.subscriber_count})')
 
 
 class RxCharacteristic(Characteristic):
@@ -92,33 +84,12 @@ class RxCharacteristic(Characteristic):
 
     def WriteValue(self, value, options):
         message = bytearray(value).decode()
-        sender_tx = self.service.tx_characteristic
+        print(f'Received message: {message}')
 
-        print(f'Received from client {sender_tx.client_id}: {message}')
-
-        # Broadcast to all OTHER clients (not the sender)
-        broadcast_message(message, source_client=sender_tx)
-
-
-def broadcast_message(message, source_client=None):
-    """
-    Broadcast a message to all connected clients except the source.
-
-    Args:
-        message (str): The message to broadcast
-        source_client (TxCharacteristic): The TX characteristic of the sender
-                                          (None if message is from server)
-    """
-    recipients = 0
-    for client_tx in connected_clients:
-        if client_tx != source_client:  # Don't send back to sender
-            client_tx.send_tx(message)
-            recipients += 1
-
-    if source_client:
-        print(f'Relayed message to {recipients} other client(s)')
-    else:
-        print(f'Broadcast server message to {recipients} client(s)')
+        # Relay to ALL connected clients
+        # NOTE: This will echo back to the sender too, because BLE GATT
+        # doesn't provide a way to exclude specific devices from notifications
+        self.service.tx_characteristic.send_tx(message)
 
 
 class UartService(Service):
@@ -126,11 +97,6 @@ class UartService(Service):
         Service.__init__(self, bus, index, UART_SERVICE_UUID, True)
         self.tx_characteristic = TxCharacteristic(bus, 0, self)
         self.rx_characteristic = RxCharacteristic(bus, 1, self)
-
-        # Assign a unique ID to this characteristic pair
-        import uuid
-        self.tx_characteristic.client_id = str(uuid.uuid4())[:8]
-
         self.add_characteristic(self.tx_characteristic)
         self.add_characteristic(self.rx_characteristic)
 
