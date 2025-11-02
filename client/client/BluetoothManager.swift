@@ -41,6 +41,9 @@ class BluetoothManager: NSObject, ObservableObject {
     private var recentlySentMessages: [(text: String, timestamp: Date)] = []
     private let echoTimeWindow: TimeInterval = 2.0  // 2 seconds
 
+    // Connection monitoring
+    private var connectionMonitorTimer: Timer?
+
     // Buffer for incoming message fragments
     private var messageBuffer: String = ""
 
@@ -95,8 +98,44 @@ class BluetoothManager: NSObject, ObservableObject {
     }
 
     func disconnect() {
+        print("🔌 Disconnecting...")
+        stopConnectionMonitor()
         if let peripheral = connectedPeripheral {
             centralManager.cancelPeripheralConnection(peripheral)
+        }
+    }
+
+    // MARK: - Connection Monitoring
+
+    private func startConnectionMonitor() {
+        stopConnectionMonitor()
+        print("👁️ Starting connection monitor")
+        connectionMonitorTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
+            self?.checkConnectionState()
+        }
+    }
+
+    private func stopConnectionMonitor() {
+        connectionMonitorTimer?.invalidate()
+        connectionMonitorTimer = nil
+        print("👁️ Stopped connection monitor")
+    }
+
+    private func checkConnectionState() {
+        guard let peripheral = connectedPeripheral else {
+            print("⚠️ Connection monitor: No peripheral")
+            return
+        }
+
+        let state = peripheral.state
+        print("👁️ Connection state: \(state.rawValue) | isConnected: \(isConnected) | isAuth: \(isAuthenticated)")
+
+        if state != .connected && isConnected {
+            print("⚠️ Connection state mismatch! Peripheral state: \(state.rawValue), but isConnected=true")
+            DispatchQueue.main.async {
+                self.isConnected = false
+                self.connectionStatus = "Connection lost"
+            }
         }
     }
 
@@ -134,16 +173,24 @@ class BluetoothManager: NSObject, ObservableObject {
     private func sendRawMessage(_ message: String) {
         guard let peripheral = connectedPeripheral,
               let characteristic = rxCharacteristic else {
-            print("Cannot send message: not ready")
+            print("❌ Cannot send message: not ready (peripheral: \(connectedPeripheral != nil), characteristic: \(rxCharacteristic != nil))")
+            return
+        }
+
+        // Check if peripheral is still connected
+        guard peripheral.state == .connected else {
+            print("❌ Cannot send message: peripheral state is \(peripheral.state.rawValue)")
             return
         }
 
         // Add newline to mark end of message
         let messageWithNewline = message + "\n"
         guard let data = messageWithNewline.data(using: .utf8) else {
-            print("Cannot encode message")
+            print("❌ Cannot encode message")
             return
         }
+
+        print("📤 Sending: \(message)")
 
         // BLE has a 20-byte limit for notifications, so we may need to split
         let maxLength = 20
@@ -163,6 +210,11 @@ class BluetoothManager: NSObject, ObservableObject {
         print("Auth message: \(message)")
 
         if message.starts(with: "AUTH_REQUIRED") {
+            // Ignore AUTH_REQUIRED if already authenticated (prevents re-authentication on reconnect)
+            guard !isAuthenticated else {
+                print("Ignoring AUTH_REQUIRED - already authenticated")
+                return
+            }
             DispatchQueue.main.async {
                 self.authState = .notStarted
                 self.authMessage = "Please sign in with your first name"
@@ -193,12 +245,14 @@ class BluetoothManager: NSObject, ObservableObject {
             // Format: ATTEMPT_RESULT:1:success:1/3
             let parts = message.components(separatedBy: ":")
             if parts.count >= 4 {
+                let attemptNum = Int(parts[1]) ?? 0  // Attempt number
                 let result = parts[2] // "success" or "failed"
                 let score = parts[3]  // "1/3"
                 let scoreParts = score.components(separatedBy: "/")
                 if scoreParts.count == 2, let passed = Int(scoreParts[0]) {
                     DispatchQueue.main.async {
                         self.authState = .verifying
+                        self.currentAttempt = attemptNum  // Update current attempt!
                         self.attemptsPassed = passed
                         self.authMessage = "Attempt \(result == "success" ? "passed" : "failed")! (\(score))"
                     }
@@ -296,6 +350,13 @@ extension BluetoothManager: CBCentralManagerDelegate {
         print("Advertisement data: \(advertisementData)")
         print("RSSI: \(RSSI)")
 
+        // Filter: Only show known devices with expected names
+        let knownDeviceNames = ["raspberrypi", "rpi-gatt-server"]
+        guard let deviceName = peripheral.name, knownDeviceNames.contains(deviceName) else {
+            print("Skipping unknown device: \(peripheral.name ?? "nil")")
+            return
+        }
+
         // Add discovered peripheral if not already in list
         if !discoveredDevices.contains(where: { $0.identifier == peripheral.identifier }) {
             DispatchQueue.main.async {
@@ -305,16 +366,29 @@ extension BluetoothManager: CBCentralManagerDelegate {
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        print("✅ CONNECTED to \(peripheral.name ?? "device")")
         connectionStatus = "Connected to \(peripheral.name ?? "device")"
         isConnected = true
         connectedPeripheral = peripheral
         peripheral.delegate = self
         peripheral.discoverServices([uartServiceUUID])
+
+        // Start monitoring connection state
+        startConnectionMonitor()
     }
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
+        print("⚠️ DISCONNECTED from \(peripheral.name ?? "device")")
+        if let error = error {
+            print("Disconnect error: \(error.localizedDescription)")
+        }
+
+        // Stop monitoring
+        stopConnectionMonitor()
         connectionStatus = "Disconnected"
         isConnected = false
+        isAuthenticated = false  // Reset authentication on disconnect
+        authState = .notStarted
         connectedPeripheral = nil
         txCharacteristic = nil
         rxCharacteristic = nil
@@ -340,18 +414,27 @@ extension BluetoothManager: CBPeripheralDelegate {
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
-        guard let characteristics = service.characteristics else { return }
+        print("📍 didDiscoverCharacteristicsFor called")
+        if let error = error {
+            print("❌ Error discovering characteristics: \(error.localizedDescription)")
+            return
+        }
+
+        guard let characteristics = service.characteristics else {
+            print("❌ No characteristics found")
+            return
+        }
 
         for characteristic in characteristics {
             if characteristic.uuid == txCharacteristicUUID {
                 // TX characteristic (receive from server)
                 txCharacteristic = characteristic
                 peripheral.setNotifyValue(true, for: characteristic)
-                print("Subscribed to TX characteristic")
+                print("✅ Subscribed to TX characteristic (notifications enabled)")
             } else if characteristic.uuid == rxCharacteristicUUID {
                 // RX characteristic (send to server)
                 rxCharacteristic = characteristic
-                print("Found RX characteristic")
+                print("✅ Found RX characteristic (ready to send)")
             }
         }
 
@@ -361,10 +444,18 @@ extension BluetoothManager: CBPeripheralDelegate {
     }
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
-        guard let data = characteristic.value,
-              let fragment = String(data: data, encoding: .utf8) else {
+        if let error = error {
+            print("❌ Error receiving data: \(error.localizedDescription)")
             return
         }
+
+        guard let data = characteristic.value,
+              let fragment = String(data: data, encoding: .utf8) else {
+            print("⚠️ Received data but cannot decode")
+            return
+        }
+
+        print("📥 Received fragment: '\(fragment.trimmingCharacters(in: .whitespacesAndNewlines))'")
 
         // Append to buffer (messages may come in fragments)
         messageBuffer += fragment
@@ -378,7 +469,7 @@ extension BluetoothManager: CBPeripheralDelegate {
                 let trimmedMessage = message.trimmingCharacters(in: .whitespaces)
                 guard !trimmedMessage.isEmpty else { continue }
 
-                print("Received: \(trimmedMessage)")
+                print("📨 Received complete message: \(trimmedMessage)")
 
                 // Route message based on prefix
                 if trimmedMessage.starts(with: "MSG:") {
@@ -392,12 +483,22 @@ extension BluetoothManager: CBPeripheralDelegate {
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
         if let error = error {
-            print("Error updating notification state: \(error.localizedDescription)")
+            print("❌ Error updating notification state: \(error.localizedDescription)")
             return
         }
 
         if characteristic.isNotifying {
-            print("Notifications enabled for \(characteristic.uuid)")
+            print("✅ Notifications ENABLED for \(characteristic.uuid)")
+        } else {
+            print("⚠️ Notifications DISABLED for \(characteristic.uuid) - This may cause disconnection!")
+        }
+    }
+
+    func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
+        if let error = error {
+            print("❌ Write failed: \(error.localizedDescription)")
+        } else {
+            print("✅ Write confirmed for \(characteristic.uuid)")
         }
     }
 }

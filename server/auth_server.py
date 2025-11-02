@@ -227,28 +227,12 @@ class RxCharacteristic(Characteristic):
                     self.service.tx_characteristic.send_tx(f"ERROR:{result['error']}")
                     return
 
-                # For new users, registration happens all at once
-                if session.is_new_user:
-                    if result.get('auth_success', False):
-                        self.service.tx_characteristic.send_tx(f"AUTH_SUCCESS:{session.username}")
-                    else:
-                        self.service.tx_characteristic.send_tx(f"AUTH_FAILED:Registration failed")
+                # Send AUTH_SUCCESS or AUTH_FAILED based on result
+                if result.get('auth_success', False):
+                    self.service.tx_characteristic.send_tx(f"AUTH_SUCCESS:{session.username}")
                 else:
-                    # For existing users, send attempt result
-                    status = 'success' if result.get('success', False) else 'failed'
-                    self.service.tx_characteristic.send_tx(
-                        f"ATTEMPT_RESULT:{result.get('attempt_number', 0)}:{status}:"
-                        f"{result.get('total_passed', 0)}/{result.get('total_attempts', 0)}"
-                    )
-
-                    # Check if authentication is complete
-                    if result.get('auth_complete', False):
-                        if result.get('auth_success', False):
-                            self.service.tx_characteristic.send_tx(f"AUTH_SUCCESS:{session.username}")
-                        else:
-                            self.service.tx_characteristic.send_tx(
-                                f"AUTH_FAILED:Only {result.get('total_passed', 0)}/3 attempts passed"
-                            )
+                    reason = result.get('message', 'Authentication failed')
+                    self.service.tx_characteristic.send_tx(f"AUTH_FAILED:{reason}")
             else:
                 self.service.tx_characteristic.send_tx('ERROR:Recording failed')
 
