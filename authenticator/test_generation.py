@@ -6,7 +6,7 @@ import time
 def test_generation():
     """
     Generate a new gesture template by collecting 3 recordings.
-    Each recording is saved as a separate file in authenticator/gestures/{gesture_name}/
+    Each recording is saved as a separate CSV file in authenticator/gestures/{gesture_name}/
     """
     
     # Create gestures directory if not exists
@@ -24,7 +24,7 @@ def test_generation():
     gesture_folder.mkdir(exist_ok=True)
     
     # Check if folder already has files
-    existing_files = list(gesture_folder.glob("*.npy"))
+    existing_files = list(gesture_folder.glob("*.csv"))
     if existing_files:
         overwrite = input(f"Gesture '{gesture_name}' folder already has {len(existing_files)} file(s). Overwrite? (y/n): ")
         if overwrite.lower() != 'y':
@@ -49,25 +49,19 @@ def test_generation():
         gesture_data = generate_single_gesture()
         gesture_recordings.append(gesture_data)
         
-        # Save individual gesture file
-        gesture_file = gesture_folder / f"gesture_{attempt}.npy"
-        np.save(gesture_file, gesture_data)
+        # Save as CSV
+        gesture_file = gesture_folder / f"gesture_{attempt}.csv"
+        np.savetxt(gesture_file, gesture_data, delimiter=',', fmt='%.6f', header='x,y', comments='')
         print(f"✓ Saved to {gesture_file}")
         
         if attempt < 3:
             print("\nPreparing for next recording...")
             time.sleep(2)
     
-    # Also save all 3 together as a single array (useful for batch processing)
-    batch_file = gesture_folder / "batch.npy"
-    batch_array = np.array(gesture_recordings)  # Shape: (3, 160, 2)
-    np.save(batch_file, batch_array)
-    print(f"\n✓ Also saved batch to {batch_file}")
-    
     print(f"\n✅ Gesture '{gesture_name}' successfully generated!")
     print(f"   Location: {gesture_folder}")
-    print(f"   Individual files: gesture_1.npy, gesture_2.npy, gesture_3.npy")
-    print(f"   Batch file: batch.npy (shape: {batch_array.shape})")
+    print(f"   Files: gesture_1.csv, gesture_2.csv, gesture_3.csv")
+    print(f"   Each file contains 160 datapoints (X, Y coordinates)")
     
     return gesture_recordings, gesture_folder
 

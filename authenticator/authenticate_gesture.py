@@ -74,29 +74,29 @@ def authenticate_against_gestures(gesture_list):
 
 
 def authenticate_interactive():
-    """Interactive mode - load gestures from file and authenticate."""
+    """Interactive mode - load gestures from CSV files and authenticate."""
     from pathlib import Path
     
     gestures_dir = Path("gestures")
     
-    if not gestures_dir.exists() or not list(gestures_dir.glob("*/batch.npy")):
+    if not gestures_dir.exists() or not list(gestures_dir.glob("*/gesture_*.csv")):
         print("❌ No saved gestures found in gestures/ directory!")
         print("Run test_generation.py first to create gesture templates.")
         return False
     
-    # List available gestures
-    gesture_files = sorted(gestures_dir.glob("*/batch.npy"))
+    # List available gestures (folders)
+    gesture_folders = sorted([d for d in gestures_dir.iterdir() if d.is_dir()])
     print("\n📋 Available gestures:")
-    for i, f in enumerate(gesture_files, 1):
-        print(f"  {i}. {f.parent.name}")
+    for i, f in enumerate(gesture_folders, 1):
+        print(f"  {i}. {f.name}")
     
     choice = input("\nSelect gesture to authenticate (number): ").strip()
     
     try:
         idx = int(choice) - 1
-        if 0 <= idx < len(gesture_files):
-            gesture_file = gesture_files[idx]
-            gesture_name = gesture_file.parent.name
+        if 0 <= idx < len(gesture_folders):
+            gesture_folder = gesture_folders[idx]
+            gesture_name = gesture_folder.name
         else:
             print("❌ Invalid selection!")
             return False
@@ -104,13 +104,20 @@ def authenticate_interactive():
         print("❌ Invalid input!")
         return False
     
-    # Load training data
+    # Load gesture CSV files
     print(f"\n🔍 Authenticating against gesture: '{gesture_name}'")
-    gesture_list = np.load(gesture_file)
+    gesture_files = sorted(gesture_folder.glob("gesture_*.csv"))
     
-    # Handle both (160, 2) and (N, 160, 2) shapes
-    if gesture_list.ndim == 2:
-        gesture_list = [gesture_list]
+    if not gesture_files:
+        print("❌ No gesture files found!")
+        return False
+    
+    gesture_list = []
+    for csv_file in gesture_files:
+        gesture_data = np.loadtxt(csv_file, delimiter=',', skiprows=1)
+        gesture_list.append(gesture_data)
+    
+    print(f"✓ Loaded {len(gesture_list)} gesture recordings")
     
     is_authenticated, results = authenticate_against_gestures(gesture_list)
     return is_authenticated
