@@ -218,55 +218,46 @@ class AuthenticationManager:
                 }
 
         else:
-            # Verification: compare new gesture against all stored gestures
+            # Verification: compare ONE new gesture against all 3 stored gestures
             # The gesture_recognizer.verify_gesture() handles:
             # - Recording 1 new gesture (4 seconds with countdown)
-            # - Comparing against all stored gestures using DTW
-            # - Returning (match, confidence) based on majority voting
+            # - Comparing against all 3 stored gestures using DTW
+            # - Returning (match, confidence) based on majority voting (2/3 or 3/3)
 
             stored_gestures = self.user_db.get_gesture_list(session.username)
 
             if not stored_gestures:
                 return {'error': 'No gestures found for user'}
 
-            print(f"Verifying attempt {session.current_attempt} for {session.username}")
-            print(f"Comparing against {len(stored_gestures)} stored gestures")
+            print(f"Verifying {session.username}")
+            print(f"Comparing single gesture against {len(stored_gestures)} stored gestures")
 
             match, confidence = self.gesture_recognizer.verify_gesture(
                 session.username,
                 stored_gestures
             )
 
-            # Record attempt result
-            session.attempts.append((match, confidence))
-            total_passed = sum(1 for success, _ in session.attempts if success)
+            print(f"Single gesture verification: {'PASS' if match else 'FAIL'} (confidence: {confidence:.2%})")
 
-            print(f"Attempt {session.current_attempt}: {'PASS' if match else 'FAIL'} "
-                  f"(confidence: {confidence:.2%}) - Total: {total_passed}/{session.current_attempt}")
+            # Single-attempt authentication: pass or fail immediately
+            auth_success = match  # True if 2/3 or 3/3 stored gestures matched
 
-            # Check if authentication is complete
-            auth_complete = session.current_attempt >= session.max_attempts
-            auth_success = total_passed >= 2  # Need 2 out of 3
-
-            if auth_complete:
-                if auth_success:
-                    session.state = AuthState.AUTHENTICATED
-                    self.user_db.update_last_login(session.username)
-                    message = f'Authentication successful! Welcome back {session.username}! ({total_passed}/3 attempts passed)'
-                else:
-                    session.state = AuthState.UNAUTHENTICATED
-                    message = f'Authentication failed. Only {total_passed}/3 attempts passed. Please try again.'
+            if auth_success:
+                session.state = AuthState.AUTHENTICATED
+                self.user_db.update_last_login(session.username)
+                message = f'Authentication successful! Welcome back {session.username}!'
             else:
-                message = f'Attempt {session.current_attempt}: {"PASS" if match else "FAIL"}. Continue...'
+                session.state = AuthState.UNAUTHENTICATED
+                message = f'Authentication failed. Gesture did not match. Please try again.'
 
             return {
-                'attempt_number': session.current_attempt,
+                'attempt_number': 1,
                 'success': match,
                 'confidence': confidence,
-                'total_passed': total_passed,
-                'total_attempts': session.current_attempt,
-                'auth_complete': auth_complete,
-                'auth_success': auth_success if auth_complete else False,
+                'total_passed': 1 if match else 0,
+                'total_attempts': 1,
+                'auth_complete': True,  # Always complete after 1 attempt
+                'auth_success': auth_success,
                 'message': message
             }
 

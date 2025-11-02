@@ -52,6 +52,14 @@ struct AuthenticationView: View {
             }
         }
         .padding()
+        .onAppear {
+            // Prevent screen from sleeping during authentication
+            UIApplication.shared.isIdleTimerDisabled = true
+        }
+        .onDisappear {
+            // Re-enable screen sleep when leaving authentication
+            UIApplication.shared.isIdleTimerDisabled = false
+        }
     }
 
     // MARK: - Subviews
@@ -107,31 +115,28 @@ struct AuthenticationView: View {
                 .font(.system(size: 50))
                 .foregroundColor(.orange)
 
-            Text(bluetoothManager.authState == .newUser ? "Register Your Gesture" : "Perform Your Gesture")
+            Text(bluetoothManager.authState == .newUser ? "Register Your Gesture" : "Verify Your Identity")
                 .font(.title2)
                 .fontWeight(.bold)
 
-            Text("You'll perform your gesture on the Raspberry Pi device")
-                .font(.body)
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal)
-
-            Text("Attempts: \(bluetoothManager.currentAttempt)/3")
-                .font(.caption)
-                .foregroundColor(.secondary)
-
-            if bluetoothManager.attemptsPassed > 0 {
-                Text("Passed: \(bluetoothManager.attemptsPassed)/3")
-                    .font(.caption)
-                    .foregroundColor(.green)
-                    .fontWeight(.semibold)
+            if bluetoothManager.authState == .newUser {
+                Text("You'll record your gesture 3 times on the Raspberry Pi")
+                    .font(.body)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
+            } else {
+                Text("Perform your gesture once on the Raspberry Pi.\nIt will be compared against your 3 registered gestures.")
+                    .font(.body)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
             }
 
             Button(action: {
                 bluetoothManager.startGestureRecording()
             }) {
-                Text(bluetoothManager.currentAttempt == 0 ? "Start" : "Try Again")
+                Text("Start")
                     .fontWeight(.semibold)
                     .foregroundColor(.white)
                     .frame(maxWidth: 300)
@@ -166,32 +171,19 @@ struct AuthenticationView: View {
 
     var verifyingView: some View {
         VStack(spacing: 20) {
-            Image(systemName: bluetoothManager.attemptsPassed >= 2 ? "checkmark.circle.fill" : "")
-                .font(.system(size: 60))
-                .foregroundColor(bluetoothManager.attemptsPassed >= 2 ? .green : .orange)
+            ProgressView()
+                .scaleEffect(2)
+                .padding()
 
             Text("Verifying...")
                 .font(.title2)
                 .fontWeight(.bold)
 
-            Text("Passed: \(bluetoothManager.attemptsPassed)/3")
-                .font(.headline)
-                .foregroundColor(bluetoothManager.attemptsPassed >= 2 ? .green : .orange)
-
-            if bluetoothManager.currentAttempt < 3 && bluetoothManager.attemptsPassed < 2 {
-                Button(action: {
-                    bluetoothManager.startGestureRecording()
-                }) {
-                    Text("Next Attempt")
-                        .fontWeight(.semibold)
-                        .foregroundColor(.white)
-                        .frame(maxWidth: 300)
-                        .padding()
-                        .background(Color.orange)
-                        .cornerRadius(10)
-                }
-                .padding(.top)
-            }
+            Text("Comparing your gesture against registered samples")
+                .font(.body)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
         }
     }
 
@@ -205,17 +197,16 @@ struct AuthenticationView: View {
                 .font(.title2)
                 .fontWeight(.bold)
 
-            Text("Only \(bluetoothManager.attemptsPassed)/3 attempts passed")
+            Text(bluetoothManager.authMessage.isEmpty ? "Your gesture did not match" : bluetoothManager.authMessage)
                 .font(.body)
                 .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
 
             Button(action: {
                 // Reset and try again
-                firstName = ""
-                bluetoothManager.authState = .notStarted
-                bluetoothManager.authMessage = ""
-                bluetoothManager.currentAttempt = 0
-                bluetoothManager.attemptsPassed = 0
+                bluetoothManager.authState = .existingUser
+                bluetoothManager.authMessage = "Ready to try again"
             }) {
                 Text("Try Again")
                     .fontWeight(.semibold)
