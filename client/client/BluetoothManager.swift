@@ -183,21 +183,11 @@ class BluetoothManager: NSObject, ObservableObject {
                 self.currentAttempt = 0
                 self.attemptsPassed = 0
             }
-        } else if message.starts(with: "COUNTDOWN:") {
-            if let seconds = Int(message.replacingOccurrences(of: "COUNTDOWN:", with: "")) {
-                DispatchQueue.main.async {
-                    self.authState = .countdown
-                    self.countdownSeconds = seconds
-                    self.authMessage = "Get ready..."
-                }
-            }
-        } else if message.starts(with: "RECORDING:") {
-            if let attempt = Int(message.replacingOccurrences(of: "RECORDING:", with: "")) {
-                DispatchQueue.main.async {
-                    self.authState = .recording
-                    self.currentAttempt = attempt
-                    self.authMessage = "Recording gesture... (Attempt \(attempt)/3)"
-                }
+        } else if message.starts(with: "RECORDING_START:") {
+            let text = message.replacingOccurrences(of: "RECORDING_START:", with: "")
+            DispatchQueue.main.async {
+                self.authState = .recording
+                self.authMessage = text
             }
         } else if message.starts(with: "ATTEMPT_RESULT:") {
             // Format: ATTEMPT_RESULT:1:success:1/3

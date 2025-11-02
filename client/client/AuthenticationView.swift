@@ -89,8 +89,6 @@ struct AuthenticationView: View {
             switch bluetoothManager.authState {
             case .newUser, .existingUser:
                 gesturePromptView
-            case .countdown:
-                countdownView
             case .recording:
                 recordingView
             case .verifying:
@@ -144,35 +142,23 @@ struct AuthenticationView: View {
         }
     }
 
-    var countdownView: some View {
-        VStack(spacing: 20) {
-            Text("\(bluetoothManager.countdownSeconds)")
-                .font(.system(size: 100, weight: .bold))
-                .foregroundColor(.orange)
-
-            Text("Get Ready!")
-                .font(.title2)
-                .foregroundColor(.secondary)
-        }
-        .transition(.scale)
-    }
-
     var recordingView: some View {
         VStack(spacing: 20) {
             ProgressView()
                 .scaleEffect(2)
                 .padding()
 
-            Text("Recording Gesture...")
+            Text("Recording...")
                 .font(.title2)
                 .fontWeight(.bold)
 
-            Text("Perform your gesture on the Raspberry Pi now")
+            Text(bluetoothManager.authMessage)
                 .font(.body)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
+                .padding(.horizontal)
 
-            Text("Attempt \(bluetoothManager.currentAttempt)/3")
+            Text("Follow the prompts on the Raspberry Pi")
                 .font(.caption)
                 .foregroundColor(.secondary)
         }
