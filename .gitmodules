@@ -1,0 +1,6 @@
+[submodule "authenticator/mpu6050"]
+	path = authenticator/mpu6050
+	url = https://github.com/m-rtijn/mpu6050.git
+[submodule "server/pi-ble-uart-server"]
+	path = server/pi-ble-uart-server
+	url = https://github.com/mengguang/pi-ble-uart-server.git

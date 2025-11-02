@@ -7,10 +7,14 @@ Each client has its own connection, and messages are broadcast to all OTHER clie
 (not echoed back to the sender).
 """
 
+import os
 import sys
 import dbus
 import dbus.mainloop.glib
 from gi.repository import GLib
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'pi-ble-uart-server'))
+
 from example_advertisement import Advertisement
 from example_advertisement import register_ad_cb, register_ad_error_cb
 from example_gatt_server import Service, Characteristic
