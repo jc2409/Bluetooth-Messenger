@@ -220,27 +220,32 @@ class RxCharacteristic(Characteristic):
                 # Process the gesture (this is where actual recording happens)
                 result = auth_manager.process_gesture_attempt(device_id)
 
+                # Check for errors in result
+                if 'error' in result:
+                    self.service.tx_characteristic.send_tx(f"ERROR:{result['error']}")
+                    return False
+
                 # For new users, registration happens all at once
                 if session.is_new_user:
-                    if result['auth_success']:
+                    if result.get('auth_success', False):
                         self.service.tx_characteristic.send_tx(f"AUTH_SUCCESS:{session.username}")
                     else:
                         self.service.tx_characteristic.send_tx(f"AUTH_FAILED:Registration failed")
                 else:
                     # For existing users, send attempt result
-                    status = 'success' if result['success'] else 'failed'
+                    status = 'success' if result.get('success', False) else 'failed'
                     self.service.tx_characteristic.send_tx(
-                        f"ATTEMPT_RESULT:{result['attempt_number']}:{status}:"
-                        f"{result['total_passed']}/{result['total_attempts']}"
+                        f"ATTEMPT_RESULT:{result.get('attempt_number', 0)}:{status}:"
+                        f"{result.get('total_passed', 0)}/{result.get('total_attempts', 0)}"
                     )
 
                     # Check if authentication is complete
-                    if result['auth_complete']:
-                        if result['auth_success']:
+                    if result.get('auth_complete', False):
+                        if result.get('auth_success', False):
                             self.service.tx_characteristic.send_tx(f"AUTH_SUCCESS:{session.username}")
                         else:
                             self.service.tx_characteristic.send_tx(
-                                f"AUTH_FAILED:Only {result['total_passed']}/3 attempts passed"
+                                f"AUTH_FAILED:Only {result.get('total_passed', 0)}/3 attempts passed"
                             )
             else:
                 self.service.tx_characteristic.send_tx('ERROR:Recording failed')
