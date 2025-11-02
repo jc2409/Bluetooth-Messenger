@@ -192,6 +192,21 @@ class RxCharacteristic(Characteristic):
         except Exception as e:
             print(f'Error in gesture ready: {e}')
 
+    def _send_countdown_and_record_message(self, sample_num=None):
+        """Send countdown and recording message"""
+        import time
+
+        if sample_num:
+            self.service.tx_characteristic.send_tx(f'SAMPLE_START:Sample {sample_num}/3')
+
+        # Send 3-second countdown
+        for i in range(3, 0, -1):
+            self.service.tx_characteristic.send_tx(f'COUNTDOWN:{i}')
+            time.sleep(1)
+
+        # Notify recording is happening
+        self.service.tx_characteristic.send_tx('RECORDING:Recording...')
+
     def _do_gesture_recording_threaded(self, device_id):
         """Run gesture recording in background thread (called from threading.Thread)"""
         global auth_manager
@@ -201,33 +216,39 @@ class RxCharacteristic(Characteristic):
             if not session:
                 return
 
-            # Notify iOS that recording is starting
-            if session.is_new_user:
-                self.service.tx_characteristic.send_tx(
-                    f'RECORDING_START:Will collect 3 gesture samples. Get ready!'
-                )
-            else:
-                self.service.tx_characteristic.send_tx(
-                    f'RECORDING_START:Get ready to perform your gesture!'
-                )
-
-            # Send 3-second countdown
-            import time
-            for i in range(3, 0, -1):
-                self.service.tx_characteristic.send_tx(f'COUNTDOWN:{i}')
-                time.sleep(1)
-
-            # Notify that recording is now happening
-            self.service.tx_characteristic.send_tx('RECORDING:Recording your gesture...')
-
             # Update session state
             success = auth_manager.start_gesture_recording(device_id)
 
             if success:
-                # This is the blocking call - now it runs in background thread
-                print(f"[THREAD] Starting gesture recording for {device_id}...")
-                result = auth_manager.process_gesture_attempt(device_id)
-                print(f"[THREAD] Gesture recording complete for {device_id}")
+                # Handle registration (3 samples) vs verification (1 sample)
+                if session.is_new_user:
+                    # Registration: We need to send countdown for each of 3 samples
+                    self.service.tx_characteristic.send_tx(
+                        'RECORDING_START:Will collect 3 gesture samples. Get ready!'
+                    )
+
+                    # Note: The actual recording happens in process_gesture_attempt
+                    # but it collects 3 samples internally. We approximate the timing.
+                    for sample in range(1, 4):
+                        self._send_countdown_and_record_message(sample)
+                        # Each sample takes ~4 seconds, wait for it
+                        import time
+                        time.sleep(4.5)
+
+                    # Now call the actual registration
+                    print(f"[THREAD] Starting registration for {device_id}...")
+                    result = auth_manager.process_gesture_attempt(device_id)
+                    print(f"[THREAD] Registration complete for {device_id}")
+                else:
+                    # Verification: Single gesture
+                    self.service.tx_characteristic.send_tx(
+                        'RECORDING_START:Get ready to perform your gesture!'
+                    )
+                    self._send_countdown_and_record_message()
+
+                    print(f"[THREAD] Starting verification for {device_id}...")
+                    result = auth_manager.process_gesture_attempt(device_id)
+                    print(f"[THREAD] Verification complete for {device_id}")
 
                 # Check for errors in result
                 if 'error' in result:

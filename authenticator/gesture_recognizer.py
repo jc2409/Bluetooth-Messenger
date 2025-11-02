@@ -56,7 +56,7 @@ class GestureRecognizer:
             for i in range(num_samples):
                 try:
                     print(f"\n--- Sample {i+1}/{num_samples} ---")
-                    gesture_array = generate_single_gesture()
+                    gesture_array = generate_single_gesture(countdown=0)  # No countdown - handled by BLE
 
                     # Verify shape is correct (160, 2)
                     if gesture_array.shape != (160, 2):
@@ -102,7 +102,7 @@ class GestureRecognizer:
 
             try:
                 # Use authenticate_against_gestures which handles recording and comparison
-                is_authenticated, results = authenticate_against_gestures(stored_gestures)
+                is_authenticated, results = authenticate_against_gestures(stored_gestures, countdown=0)  # No countdown - handled by BLE
 
                 # Calculate confidence as ratio of passed gestures
                 passed_count = results.get('passed_count', 0)
