@@ -89,24 +89,38 @@ class RxCharacteristic(Characteristic):
         Characteristic.__init__(self, bus, index, UART_RX_CHARACTERISTIC_UUID,
                                 ['write'], service)
         self.service = service
+        self.message_buffer = ""  # Buffer for incoming message fragments
 
     def WriteValue(self, value, options):
         """Handle incoming message from client"""
         global auth_manager
 
         try:
-            message = bytearray(value).decode().strip()
-            print(f'← Received: {message}')
+            fragment = bytearray(value).decode()
+            self.message_buffer += fragment
 
-            # Parse protocol message
-            if message.startswith('USERNAME:'):
-                self._handle_username(message)
-            elif message.startswith('READY_FOR_GESTURE'):
-                self._handle_gesture_ready(message)
-            elif message.startswith('MSG:'):
-                self._handle_chat_message(message)
-            else:
-                print(f'Unknown message format: {message}')
+            # Check if we have a complete message (ends with newline)
+            if '\n' in self.message_buffer:
+                messages = self.message_buffer.split('\n')
+                self.message_buffer = messages[-1]  # Keep incomplete fragment
+
+                # Process each complete message
+                for message in messages[:-1]:
+                    message = message.strip()
+                    if not message:
+                        continue
+
+                    print(f'← Received: {message}')
+
+                    # Parse protocol message
+                    if message.startswith('USERNAME:'):
+                        self._handle_username(message)
+                    elif message.startswith('READY_FOR_GESTURE'):
+                        self._handle_gesture_ready(message)
+                    elif message.startswith('MSG:'):
+                        self._handle_chat_message(message)
+                    else:
+                        print(f'Unknown message format: {message}')
 
         except Exception as e:
             print(f'Error handling message: {e}')
