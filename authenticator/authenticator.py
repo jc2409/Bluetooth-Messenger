@@ -19,7 +19,7 @@ from pathlib import Path
 warnings.filterwarnings('ignore')
 
 # Configuration - Thresholds for each algorithm (OPTIMIZED for 2D data)
-SIMILARITY_THRESHOLD_DTW = 0.044  # Changed from 0.055 - more lenient
+SIMILARITY_THRESHOLD_DTW = 0.035  # Changed from 0.055 - more lenient
 SIMILARITY_THRESHOLD_TWED = 0.30  # Tightened from 0.35 - reduce false positives
 SIMILARITY_THRESHOLD_SHAPEDTW = 0.12  # Tightened from 0.14 - reduce false positives
 SIMILARITY_THRESHOLD_HMM = -1.25  # Tightened from -1.2 - more selective (more negative = stricter)
